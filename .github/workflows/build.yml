@@ -44,7 +44,10 @@ jobs:
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
-          build 2>&1 | tail -30
+          CODE_SIGNING_STYLE=Manual \
+          DEVELOPMENT_TEAM="" \
+          PROVISIONING_PROFILE_SPECIFIER="" \
+          build 2>&1 | tail -50
 
     - name: Create IPA with ldid signing
       run: |
@@ -53,10 +56,43 @@ jobs:
         if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
           echo "Found app at: $APP_PATH"
 
+          # Remove any existing code signature
+          rm -rf "$APP_PATH/_CodeSignature"
+
+          # Copy app to Payload
           cp -R "$APP_PATH" /tmp/ipa_output/Payload/
 
-          ldid -S /tmp/ipa_output/Payload/kfun.app/kfun || echo "ldid signing done"
+          APP_BUNDLE="/tmp/ipa_output/Payload/kfun.app"
+          ENTITLEMENTS="$GITHUB_WORKSPACE/darksword-kexploit-fun/darksword-kexploit-fun/entitlements.plist"
 
+          # Sign main executable with entitlements
+          echo "[+] Signing main executable..."
+          ldid -S"$ENTITLEMENTS" "$APP_BUNDLE/kfun" || {
+            echo "[-] ldid signing with entitlements failed, trying without..."
+            ldid -S "$APP_BUNDLE/kfun" || echo "[-] ldid signing failed"
+          }
+
+          # Sign all other Mach-O binaries in the app bundle
+          echo "[+] Signing additional binaries..."
+          find "$APP_BUNDLE" -type f \( -name "*.dylib" -o -name "*.framework" \) | while read -r file; do
+            if file "$file" | grep -q "Mach-O"; then
+              echo "  Signing: $file"
+              ldid -S"$ENTITLEMENTS" "$file" 2>/dev/null || ldid -S "$file" 2>/dev/null || true
+            fi
+          done
+
+          # Sign any standalone executables
+          find "$APP_BUNDLE" -type f -perm +111 | while read -r file; do
+            if file "$file" | grep -q "Mach-O"; then
+              echo "  Signing executable: $file"
+              ldid -S"$ENTITLEMENTS" "$file" 2>/dev/null || ldid -S "$file" 2>/dev/null || true
+            fi
+          done
+
+          # Remove _CodeSignature if ldid created one
+          rm -rf "$APP_BUNDLE/_CodeSignature"
+
+          # Create IPA
           cd /tmp/ipa_output
           zip -r kfun.ipa Payload
 
@@ -64,6 +100,8 @@ jobs:
           ls -la /tmp/ipa_output/
         else
           echo "ERROR: Could not find kfun.app"
+          echo "Searching DerivedData..."
+          find ~/Library/Developer/Xcode/DerivedData -type d -name "*.app" 2>/dev/null
           exit 1
         fi
 
