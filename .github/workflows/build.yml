@@ -90,11 +90,12 @@ jobs:
         ls -la "$ENTITLEMENTS" || echo "WARNING: Entitlements file not found!"
 
         # Read executable name from Info.plist
-        EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Info.plist" 2>/dev/null)
+        EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Info.plist" 2>/dev/null || echo "kfun")
         if [ -z "$EXEC_NAME" ]; then
             EXEC_NAME="kfun"
         fi
         echo "[+] Executable name from Info.plist: $EXEC_NAME"
+        echo "[+] App bundle contents:"
         ls -la "$APP_BUNDLE/"
 
         # Sign main executable
