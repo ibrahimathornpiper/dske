@@ -89,12 +89,12 @@ jobs:
         echo "[+] Entitlements path: $ENTITLEMENTS"
         ls -la "$ENTITLEMENTS" || echo "WARNING: Entitlements file not found!"
 
-        # Find the actual executable name
-        EXEC_NAME=$(ls "$APP_BUNDLE" | grep -v '\.' | head -1)
+        # Read executable name from Info.plist
+        EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Info.plist" 2>/dev/null)
         if [ -z "$EXEC_NAME" ]; then
-            EXEC_NAME=$(ls "$APP_BUNDLE" | grep -v 'Info.plist' | grep -v 'PkgInfo' | grep -v '_CodeSignature' | head -1)
+            EXEC_NAME="kfun"
         fi
-        echo "[+] Detected executable: $EXEC_NAME"
+        echo "[+] Executable name from Info.plist: $EXEC_NAME"
         ls -la "$APP_BUNDLE/"
 
         # Sign main executable
