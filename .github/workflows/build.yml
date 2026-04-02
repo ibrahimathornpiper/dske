@@ -84,7 +84,7 @@ jobs:
         cp -R "$APP_PATH" /tmp/ipa_output/Payload/
 
         APP_BUNDLE="/tmp/ipa_output/Payload/kfun.app"
-        ENTITLEMENTS="$GITHUB_WORKSPACE/darksword-kexploit-fun/darksword-kexploit-fun/entitlements.plist"
+        ENTITLEMENTS="$GITHUB_WORKSPACE/darksword-kexploit-fun/entitlements.plist"
 
         echo "[+] Entitlements path: $ENTITLEMENTS"
         ls -la "$ENTITLEMENTS" || echo "WARNING: Entitlements file not found!"
