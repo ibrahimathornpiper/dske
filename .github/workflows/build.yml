@@ -38,6 +38,7 @@ jobs:
         SCHEME: darksword-kexploit-fun
         CONFIGURATION: Release
       run: |
+        xcodebuild clean -project "$PROJECT_DIR" -scheme "$SCHEME"
         xcodebuild -project "$PROJECT_DIR" \
           -scheme "$SCHEME" \
           -configuration "$CONFIGURATION" \
@@ -77,6 +78,13 @@ jobs:
 
         echo "[+] Found app at: $APP_PATH"
 
+        # Verify the app bundle has the executable before proceeding
+        if [ ! -f "$APP_PATH/Info.plist" ]; then
+          echo "ERROR: kfun.app/Info.plist missing - build failed"
+          tail -100 /tmp/xcodebuild.log
+          exit 1
+        fi
+
         # Remove any existing code signature directory
         rm -rf "$APP_PATH/_CodeSignature"
 
@@ -90,11 +98,11 @@ jobs:
         ls -la "$ENTITLEMENTS" || echo "WARNING: Entitlements file not found!"
 
         # Read executable name from Info.plist
-        EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Info.plist" 2>/dev/null || echo "kfun")
-        if [ -z "$EXEC_NAME" ]; then
+        EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Info.plist" 2>/dev/null)
+        if [ -z "$EXEC_NAME" ] || echo "$EXEC_NAME" | grep -q "Doesn't Exist"; then
             EXEC_NAME="kfun"
         fi
-        echo "[+] Executable name from Info.plist: $EXEC_NAME"
+        echo "[+] Executable name: $EXEC_NAME"
         echo "[+] App bundle contents:"
         ls -la "$APP_BUNDLE/"
 
