@@ -27,11 +27,13 @@ jobs:
     - name: Install ldid
       run: |
         brew install ldid
+        which ldid
+        ldid -v
 
     - name: Select Xcode
       run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    - name: Build iOS Project (no signing for CI)
+    - name: Build iOS Project
       env:
         PROJECT_DIR: darksword-kexploit-fun.xcodeproj
         SCHEME: darksword-kexploit-fun
@@ -41,69 +43,105 @@ jobs:
           -scheme "$SCHEME" \
           -configuration "$CONFIGURATION" \
           -destination 'generic/platform=iOS' \
-          CODE_SIGN_IDENTITY="" \
+          CODE_SIGN_IDENTITY="-" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_STYLE=Manual \
+          CODE_SIGNING_ALLOWED=YES \
+          AD_HOC_CODE_SIGNING_ALLOWED=YES \
+          CODE_SIGN_ENTITLEMENTS="" \
           DEVELOPMENT_TEAM="" \
+          PROVISIONING_PROFILE="" \
           PROVISIONING_PROFILE_SPECIFIER="" \
-          build 2>&1 | tail -50
+          build 2>&1 | tee /tmp/xcodebuild.log | tail -50
+
+    - name: Find built app
+      run: |
+        echo "=== Searching for .app ==="
+        find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d 2>/dev/null || true
+        echo "=== Searching for kfun.app specifically ==="
+        find ~/Library/Developer/Xcode/DerivedData -name "kfun.app" -type d 2>/dev/null || true
+        echo "=== All .app bundles ==="
+        find ~/Library/Developer/Xcode/DerivedData -name "*.app" 2>/dev/null | head -20 || true
 
     - name: Create IPA with ldid signing
       run: |
+        set -e
+
         mkdir -p /tmp/ipa_output/Payload
+
         APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "kfun.app" -type d 2>/dev/null | head -1)
-        if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
-          echo "Found app at: $APP_PATH"
-
-          # Remove any existing code signature
-          rm -rf "$APP_PATH/_CodeSignature"
-
-          # Copy app to Payload
-          cp -R "$APP_PATH" /tmp/ipa_output/Payload/
-
-          APP_BUNDLE="/tmp/ipa_output/Payload/kfun.app"
-          ENTITLEMENTS="$GITHUB_WORKSPACE/darksword-kexploit-fun/darksword-kexploit-fun/entitlements.plist"
-
-          # Sign main executable with entitlements
-          echo "[+] Signing main executable..."
-          ldid -S"$ENTITLEMENTS" "$APP_BUNDLE/kfun" || {
-            echo "[-] ldid signing with entitlements failed, trying without..."
-            ldid -S "$APP_BUNDLE/kfun" || echo "[-] ldid signing failed"
-          }
-
-          # Sign all other Mach-O binaries in the app bundle
-          echo "[+] Signing additional binaries..."
-          find "$APP_BUNDLE" -type f \( -name "*.dylib" -o -name "*.framework" \) | while read -r file; do
-            if file "$file" | grep -q "Mach-O"; then
-              echo "  Signing: $file"
-              ldid -S"$ENTITLEMENTS" "$file" 2>/dev/null || ldid -S "$file" 2>/dev/null || true
-            fi
-          done
-
-          # Sign any standalone executables
-          find "$APP_BUNDLE" -type f -perm +111 | while read -r file; do
-            if file "$file" | grep -q "Mach-O"; then
-              echo "  Signing executable: $file"
-              ldid -S"$ENTITLEMENTS" "$file" 2>/dev/null || ldid -S "$file" 2>/dev/null || true
-            fi
-          done
-
-          # Remove _CodeSignature if ldid created one
-          rm -rf "$APP_BUNDLE/_CodeSignature"
-
-          # Create IPA
-          cd /tmp/ipa_output
-          zip -r kfun.ipa Payload
-
-          echo "IPA created successfully"
-          ls -la /tmp/ipa_output/
-        else
+        if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
           echo "ERROR: Could not find kfun.app"
-          echo "Searching DerivedData..."
-          find ~/Library/Developer/Xcode/DerivedData -type d -name "*.app" 2>/dev/null
+          echo "Last 100 lines of xcodebuild log:"
+          tail -100 /tmp/xcodebuild.log
           exit 1
         fi
+
+        echo "[+] Found app at: $APP_PATH"
+
+        # Remove any existing code signature directory
+        rm -rf "$APP_PATH/_CodeSignature"
+
+        # Copy app to Payload
+        cp -R "$APP_PATH" /tmp/ipa_output/Payload/
+
+        APP_BUNDLE="/tmp/ipa_output/Payload/kfun.app"
+        ENTITLEMENTS="$GITHUB_WORKSPACE/darksword-kexploit-fun/darksword-kexploit-fun/entitlements.plist"
+
+        echo "[+] Entitlements path: $ENTITLEMENTS"
+        ls -la "$ENTITLEMENTS" || echo "WARNING: Entitlements file not found!"
+
+        # Sign main executable
+        echo "[+] Signing main executable: $APP_BUNDLE/kfun"
+        file "$APP_BUNDLE/kfun"
+        if [ -f "$ENTITLEMENTS" ]; then
+          ldid -S"$ENTITLEMENTS" "$APP_BUNDLE/kfun"
+        else
+          ldid -S "$APP_BUNDLE/kfun"
+        fi
+        echo "[+] Main executable signed"
+
+        # Sign the XPF dylib if it exists
+        if [ -f "$APP_BUNDLE/Frameworks/libxpf.dylib" ]; then
+          echo "[+] Signing libxpf.dylib"
+          if [ -f "$ENTITLEMENTS" ]; then
+            ldid -S"$ENTITLEMENTS" "$APP_BUNDLE/Frameworks/libxpf.dylib"
+          else
+            ldid -S "$APP_BUNDLE/Frameworks/libxpf.dylib"
+          fi
+        fi
+
+        # Sign any other dylibs
+        find "$APP_BUNDLE" -name "*.dylib" -type f | while read -r lib; do
+          echo "[+] Signing dylib: $lib"
+          ldid -S "$lib" 2>/dev/null || true
+        done
+
+        # Sign any frameworks
+        find "$APP_BUNDLE" -name "*.framework" -type d | while read -r fw; do
+          fw_bin=$(basename "$fw" .framework)
+          fw_path="$fw/$fw_bin"
+          if [ -f "$fw_path" ]; then
+            echo "[+] Signing framework binary: $fw_path"
+            ldid -S "$fw_path" 2>/dev/null || true
+          fi
+        done
+
+        # Remove any _CodeSignature that might have been created
+        rm -rf "$APP_BUNDLE/_CodeSignature"
+
+        # Verify signing
+        echo "[+] Verifying signature on main executable..."
+        codesign -dvv "$APP_BUNDLE/kfun" 2>&1 || true
+
+        # Create IPA
+        cd /tmp/ipa_output
+        zip -r kfun.ipa Payload
+
+        echo ""
+        echo "========================================="
+        echo "  IPA created successfully!"
+        echo "========================================="
+        ls -lh /tmp/ipa_output/kfun.ipa
 
     - name: Upload IPA artifact
       uses: actions/upload-artifact@v4
