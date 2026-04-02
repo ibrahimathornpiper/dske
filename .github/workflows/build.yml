@@ -89,13 +89,21 @@ jobs:
         echo "[+] Entitlements path: $ENTITLEMENTS"
         ls -la "$ENTITLEMENTS" || echo "WARNING: Entitlements file not found!"
 
+        # Find the actual executable name
+        EXEC_NAME=$(ls "$APP_BUNDLE" | grep -v '\.' | head -1)
+        if [ -z "$EXEC_NAME" ]; then
+            EXEC_NAME=$(ls "$APP_BUNDLE" | grep -v 'Info.plist' | grep -v 'PkgInfo' | grep -v '_CodeSignature' | head -1)
+        fi
+        echo "[+] Detected executable: $EXEC_NAME"
+        ls -la "$APP_BUNDLE/"
+
         # Sign main executable
-        echo "[+] Signing main executable: $APP_BUNDLE/kfun"
-        file "$APP_BUNDLE/kfun"
+        echo "[+] Signing main executable: $APP_BUNDLE/$EXEC_NAME"
+        file "$APP_BUNDLE/$EXEC_NAME"
         if [ -f "$ENTITLEMENTS" ]; then
-          ldid -S"$ENTITLEMENTS" "$APP_BUNDLE/kfun"
+          ldid -S"$ENTITLEMENTS" "$APP_BUNDLE/$EXEC_NAME"
         else
-          ldid -S "$APP_BUNDLE/kfun"
+          ldid -S "$APP_BUNDLE/$EXEC_NAME"
         fi
         echo "[+] Main executable signed"
 
@@ -130,7 +138,7 @@ jobs:
 
         # Verify signing
         echo "[+] Verifying signature on main executable..."
-        codesign -dvv "$APP_BUNDLE/kfun" 2>&1 || true
+        codesign -dvv "$APP_BUNDLE/$EXEC_NAME" 2>&1 || true
 
         # Create IPA
         cd /tmp/ipa_output
